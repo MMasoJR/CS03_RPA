@@ -1,0 +1,33 @@
+# Ambiente virtual
+venv/
+env/
+.venv/
+
+# Variáveis de ambiente / segredos — NUNCA commitar
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+
+# Dados gerados pelo pipeline (Não são código-fonte, então não precisam ser enviados)
+data/*.csv
+data/models/
+data/weg_w22_technical_context.json
+data/weg_w22_technical_context.csv
+
+# Logs
+logs/
+*.log
+
+# Playwright
+node_modules/
+
+# Editor / SO
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

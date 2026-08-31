@@ -1,0 +1,140 @@
+========================================================================
+  CS03_RPA — GUIA DE EXECUCAO
+  Sistema de Monitoramento Preditivo de Motores Eletricos (Digital Twin)
+  CS02 (RPA) + CS03 (Web Scraping, ML e Automacao de Eventos)
+========================================================================
+
+--------------------------------------------------------------------
+1. PRE-REQUISITOS
+--------------------------------------------------------------------
+- Python 3.12 instalado
+- Ambiente virtual (venv) criado e ativado
+- Conta no Supabase com um projeto Postgres criado
+- Arquivo .env na raiz do projeto (NUNCA sobe pro Git), com:
+
+    DB_HOST=db.<PROJECT_ID>.supabase.co
+    DB_PORT=5432
+    DB_USER=postgres
+    DB_PASSWORD=<sua senha do Supabase>
+    DB_NAME=postgres
+
+    PIPELINE_MODE=once
+    BATCH_INTERVAL_SECONDS=30
+    NUM_MOTORS=15
+    LOG_LEVEL=INFO
+
+--------------------------------------------------------------------
+2. INSTALACAO
+--------------------------------------------------------------------
+No terminal, na raiz do projeto, com o venv ativado:
+
+    pip install -r requirements.txt
+    playwright install chromium
+
+--------------------------------------------------------------------
+3. VALIDAR A CONEXAO COM O BANCO (opcional, mas recomendado)
+--------------------------------------------------------------------
+    python -c "from config.settings import settings; print(settings.database_url)"
+
+O host impresso deve ser o do Supabase (db.<PROJECT_ID>.supabase.co),
+NUNCA "localhost". Se aparecer "localhost", o .env nao esta sendo lido
+(verifique se o arquivo se chama exatamente ".env" e se nao existem
+variaveis DB_* setadas na sessao do terminal — teste com:
+Get-ChildItem Env:DB_*  no PowerShell).
+
+--------------------------------------------------------------------
+4. RODAR O SCRAPER (Pilar 1 — CS03)
+--------------------------------------------------------------------
+Coleta o contexto tecnico externo (catalogo WEG W22) usado depois pelo
+motor de regras. So precisa rodar uma vez (o resultado fica salvo em
+disco e e reaproveitado pelos ciclos seguintes):
+
+    python -m src.scraper.weg_catalog_scraper
+
+Gera: data/weg_w22_technical_context.json e .csv
+
+--------------------------------------------------------------------
+5. RODAR O PIPELINE COMPLETO (CS02 + CS03)
+--------------------------------------------------------------------
+Executa um ciclo completo: coleta -> transformacao -> validacao ->
+carga -> deteccao de anomalia (ML) -> motor de regras (eventos e
+status). Cria as tabelas no banco automaticamente na primeira vez.
+
+    python -m src.pipeline.orchestrator
+
+Com PIPELINE_MODE=once no .env, roda um ciclo e encerra.
+Com PIPELINE_MODE=batch, roda em loop a cada BATCH_INTERVAL_SECONDS.
+
+--------------------------------------------------------------------
+6. SIMULAR HISTORICO E ANOMALIAS (para testar a automacao rapidamente)
+--------------------------------------------------------------------
+Gera 65 leituras simuladas (a maioria normal, ~23% com uma anomalia
+proposital: temperatura critica, vibracao critica, sobrecarga de
+corrente, desvio de RPM ou fator de potencia baixo), passando cada
+uma pela pipeline real inteira, incluindo o motor de regras:
+
+    python -m scripts.seed_65_readings
+
+No final, imprime um resumo: quantas leituras, quantas anomalias
+detectadas, quantos eventos ALERTA e CRITICO.
+
+--------------------------------------------------------------------
+7. RETREINAR O MODELO DE ML (apos acumular historico)
+--------------------------------------------------------------------
+Depois de ter pelo menos ~30 leituras processadas no banco, substitui
+o fallback baseado em regra por um Isolation Forest treinado de
+verdade nos dados reais:
+
+    python -m scripts.retrain_anomaly_model
+
+Nao precisa rodar a cada ciclo — periodicamente (ex: 1x por dia) ja
+e suficiente.
+
+--------------------------------------------------------------------
+8. ABRIR O DASHBOARD
+--------------------------------------------------------------------
+Painel visual com status de cada ativo, historico de leituras e log
+de eventos/alertas gerados pelo motor de regras. Roda a partir da
+RAIZ do projeto (nao entre em src/dashboard antes):
+
+    streamlit run src/dashboard/app.py
+
+Abre em http://localhost:8501
+
+Requisito: o arquivo data/cadastro_ativos.csv precisa existir (gerado
+pelo RPA de cadastro, src/automations/rpa_cadastro.py) para a
+navegacao por Planta/Area/TAG funcionar.
+
+--------------------------------------------------------------------
+9. RODAR OS TESTES
+--------------------------------------------------------------------
+Smoke test do pipeline completo + testes unitarios do scraper, do
+modelo de anomalia e do motor de regras. Usa SQLite em memoria, entao
+NAO depende do Supabase estar acessivel:
+
+    pytest tests/test_pipeline_local.py -v
+
+--------------------------------------------------------------------
+10. CONFERIR OS DADOS NO SUPABASE
+--------------------------------------------------------------------
+No painel do Supabase: Table Editor. Tabelas esperadas, todas
+populadas apos os passos 5 e/ou 6:
+
+    assets              -> motores cadastrados automaticamente
+    sensor_readings      -> leituras brutas
+    processed_readings   -> leituras normalizadas (com health_score)
+    asset_snapshots       -> foto do estado de cada ativo por ciclo
+    asset_events          -> log de alertas gerados pelo motor de regras
+    pipeline_logs          -> rastreabilidade de cada execucao
+
+--------------------------------------------------------------------
+ORDEM RESUMIDA (do zero ate o dashboard populado)
+--------------------------------------------------------------------
+    pip install -r requirements.txt -r requirements_cs03.txt
+    playwright install chromium
+    python -m src.scraper.weg_catalog_scraper
+    python -m scripts.seed_65_readings
+    pytest tests/test_pipeline_local.py -v
+    streamlit run src/dashboard/app.py
+
+========================================================================
